@@ -124,8 +124,12 @@ lexC = (text) => {
         throw new SyntaxError(`Can't lex # directive ${str.substring(1)}`)
       }
     }
-    if (match.groups.name && keywords[str])
-      result.keyword = str
+    if (match.groups.name) {
+      if (keywords[str])
+        result.keyword = str
+      else
+        result.name = str
+    }
     if (match.groups.string)
       result.string = str.substring(1, str.length - 1)
     if (match.groups.char)
@@ -140,46 +144,182 @@ lexC = (text) => {
   if (lexIndex != text.length) {
     throw new SyntaxError(`Can't lex ${text.substring(lexIndex)} at position ${lexIndex}`)
   }
+  tokens.push({ end: true })
+  console.log(tokens)
   return tokens
 }
+
 
 parseC = (text) => {
   const tokens = lexC(text)
   console.log(tokens)
 
-  let tree = { tag: "top level", k: [] }
+  let idx = 0
 
-  // add tree part to tree after inner functions succeed
+  // a sort of rewind wrapper. It tries a parse, if that fails it resets the idx
+  const p = (f) => {
+    const startIdx = idx
+    const result = f()
+    if (result) return result
+    idx = startIdx
+  }
 
-  // parseBlock
-
-  // parseStatements
-
+  // can you parse from here based on one token? 
+  // don't know if it's a varible or function definition if it starts with [type name]
+  // for that reason not going for a predictive parser rn
   // parseStatement
 
-  // parseFn
+  // once the ast is typechecked, all the types will be deduplicated 
+  // and each value will have a pointer to its type object
 
-  // parseDeclaration
+  // before typechecking each type will essentilly be a bag of booleans
+  // major types: int float char string array struct
 
-  const parseExpression = (subtree, idx) => {
+  const parserUnion = (...parsers) => {
+    const startIdx = idx
+    for (let parser of parsers) {
+      const result = parser()
+      if (result) return result
+      idx = startIdx
+    }
+  }
 
+  // block is just statements + curly braces
+  const parseBlock = () => {
+    if (tokens[idx].text !== "{") return
+    idx++
+    const result = p(parseStatements)
+    if (result === undefined) return
+    if (tokens[idx].text !== "}") return
+    idx++
+    return result
+  }
+
+  const parseStatements = () => {
+    const node = { astType: "statements", statements: [] }
+    while (true) {
+      const statement = p(parseStatement)
+      if (statement) node.statements.push(statement)
+      else break
+    }
+    if (node.statements.length > 0) return node
+  }
+
+  const parseStatement = () => parserUnion(parseDeclaration, parseFunctionDeclaration, parseControlFlow)
+
+  const parseControlFlow = () => parserUnion(parseWhile, parseFor, parseIf, parseDoWhile)
+
+  const parseWhile = () => {
+    const node = { astType: "while", condition: undefined, body: undefined }
+    if (tokens[idx].keyword !== "while") return
+    idx++
+    if (tokens[idx].text !== "(") return
+    idx++
+    node.condition = p(parseExpression)
+    if (!node.condition) return
+    if (tokens[idx].text !== ")") return
+    idx++
+
+  }
+
+  const parseFunctionDeclaration = () => {
+
+  }
+
+  const parseDeclaration = () => {
+    const node = { astType: "declaration", type: undefined, name: undefined, expression: undefined }
+
+    node.type = p(parseType)
+    if (!node.type) return
+
+    node.name = tokens[idx].name
+    if (!node.name) return
+    idx++
+
+    if (tokens[idx].text !== "=") return
+    idx++
+
+    node.expression = p(parseExpression)
+    if (!node.expression) return
+    token = tokens[idx]
+
+    if (token.text !== ";") return
+    idx++
+
+    return node
+  }
+
+
+
+  const parseType = () => {
+    const result = { astType: "type", typeTag: undefined }
+    const token = tokens[idx]
+    if (!token.keyword) {
+      return
+    }
+    switch (token.keyword) {
+      case "int":
+        result.typeTag = "int"
+        idx++
+        break
+      case "float":
+        result.typeTag = "float"
+        idx++
+        break
+      default:
+        return
+    }
+    return result
+  }
+
+  const parseExpression = () => {
+    let token = tokens[idx]
+    if (token.int !== undefined) {// because int can be zero
+      const type = { astType: "type", typeTag: "int", size: 32, unsigned: false }
+      idx++
+      return { type, expression: token.int }
+    } else if (token.float !== undefined) {// because int can be zero
+      const type = { astType: "type", typeTag: "float", size: 64 }
+      idx++
+      return { astType: "expression", expressionType: "literal", type, expression: token.float }
+    } else return
+  }
+
+  const parseFunctionApplication = () => {
+    // I prefer the word parameter over argument. less agressive
+    const node = { astType: "application", name: undefined, parameters: [] }
+    node.name = tokens[idx].name
+    if (!node.name) return
+    idx++
+    if (tokens[idx].text !== "(") return
+    idx++
+
+    // @INPROGRESS
+    return node
   }
 
   // op levels are ascending so things that aren't part of expressions (outermost level) can have oplevel undefined
 
   // parseStatements()
 
-  return tree
+  return p(parseStatements)
 }
 
-typecheckC = (ast) => {
+const defaultTypes = {
+  s64: { typeTag: "int", size: 64, unsigned: false }
+}
 
+// how to identify types???????????? Now again I think I'm going with s8, s16, ect...
+typecheckC = (ast) => {
+  const typedAst = { structs: {}, types: {}, functions: {}, globals: {}, main: undefined }
+  // can identify functions by name only because C doesn't have function overloading
 }
 
 
 generateBinary = (typedAst) => {
 
 }
+
 
 compileC = (text) => {
   const ast = parseC(text)
@@ -193,6 +333,7 @@ interpretC = (typedAst) => {
 
 }
 
+
 interpretC = (text) => {
   const ast = parseC(text)
   const typedAst = typecheckC(ast)
@@ -200,3 +341,5 @@ interpretC = (text) => {
   interpretC(typedAst, cMemory)
   return cMemory
 }
+  // static in C is WEIRD!
+  // it lets you define a global variable inside a function that's only visible inside that function.

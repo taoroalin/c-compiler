@@ -6,11 +6,12 @@ const examples = {
   if: `if(1){print("hi")}`
 }
 
-parseC(examples.expression)
-
 const runAll = () => {
   for (let key in examples) {
-    console.log(lexC(examples[key]))
+    lexC(examples[key])
   }
 }
-runAll()
+// runAll()
+
+console.log(parseC(examples.assignment))
+console.log(parseC(examples.block))
