@@ -149,7 +149,6 @@ lexC = (text) => {
   return tokens
 }
 
-
 parseC = (text) => {
   const tokens = lexC(text)
   console.log(tokens)
@@ -181,6 +180,15 @@ parseC = (text) => {
       const result = parser()
       if (result) return result
       idx = startIdx
+    }
+  }
+
+  // parser series is more complicated because you need to combine the results somehow
+  const parserSeries = (...parsers) => {
+    const startIdx = idx
+    for (let parser of parsers) {
+      const result = parser()
+      if (result !== undefined) return // @INPROGRESS
     }
   }
 
@@ -219,8 +227,37 @@ parseC = (text) => {
     if (!node.condition) return
     if (tokens[idx].text !== ")") return
     idx++
-
+    node.body = p(parseBlock)
+    if (node.body === undefined) return
+    return node
   }
+
+  const parseFor = () => {
+    const node = { astType: "for", setup: undefined, condition: undefined, increment: undefined, body: undefined }
+    if (token.keyword !== "for") return
+    idx++
+    if (token.text !== "(") return
+    idx++
+    // @INPROGRESS
+    return node
+  }
+
+  const parseIf = () => {
+    const node = { astType: "while", condition: undefined, body: undefined }
+    if (tokens[idx].keyword !== "while") return
+    idx++
+    if (tokens[idx].text !== "(") return
+    idx++
+    node.condition = p(parseExpression)
+    if (!node.condition) return
+    if (tokens[idx].text !== ")") return
+    idx++
+    node.body = p(parseBlock)
+    if (node.body === undefined) return
+    return node
+  }
+
+  const parseDoWhile = () => { }
 
   const parseFunctionDeclaration = () => {
 
@@ -272,17 +309,38 @@ parseC = (text) => {
     return result
   }
 
-  const parseExpression = () => {
+  const parseExpression = () => parserUnion(parseLiteral,
+    parseOperatorExpression,
+    parseFunctionApplication,
+    parseParenthesizedExpression)
+
+  const parseLiteral = () => {
     let token = tokens[idx]
     if (token.int !== undefined) {// because int can be zero
       const type = { astType: "type", typeTag: "int", size: 32, unsigned: false }
       idx++
-      return { type, expression: token.int }
+      return { astType: "expression", expressionType: "literal", type, value: token.int }
+
     } else if (token.float !== undefined) {// because int can be zero
       const type = { astType: "type", typeTag: "float", size: 64 }
       idx++
-      return { astType: "expression", expressionType: "literal", type, expression: token.float }
+      return { astType: "expression", expressionType: "literal", type, value: token.float }
+
+    } else if (token.char !== undefined) {// because int can be zero
+      const type = { astType: "type", typeTag: "char", size: token.char.length }
+      idx++
+      return { astType: "expression", expressionType: "literal", type, value: token.char }
+
+    } else if (token.float !== undefined) {// because int can be zero
+      const type = { astType: "type", typeTag: "string", size: token.string.length + 1 }
+      idx++
+      return { astType: "expression", expressionType: "literal", type, value: token.string }
+
     } else return
+  }
+
+  const parseOperatorExpression = () => {
+
   }
 
   const parseFunctionApplication = () => {
@@ -298,6 +356,17 @@ parseC = (text) => {
     return node
   }
 
+  // parseParenthesizedExpression = parseSeries(parseChar("("), ["singular", parseExpression], parseChar(")"))
+  const parseParenthesizedExpression = () => {
+    if (tokens[idx].text !== "(") return
+    idx++
+    const result = p(parseExpression)
+    if (result === undefined) return
+    if (tokens[idx].text !== ")") return
+    idx++
+    return result
+  }
+
   // op levels are ascending so things that aren't part of expressions (outermost level) can have oplevel undefined
 
   // parseStatements()
@@ -309,10 +378,29 @@ const defaultTypes = {
   s64: { typeTag: "int", size: 64, unsigned: false }
 }
 
+const _astTypes = "expression statements statement declaration type while for if "
+const _expressionTypes = "literal operatorExpression application"
+
 // how to identify types???????????? Now again I think I'm going with s8, s16, ect...
 typecheckC = (ast) => {
   const typedAst = { structs: {}, types: {}, functions: {}, globals: {}, main: undefined }
   // can identify functions by name only because C doesn't have function overloading
+
+  const typecheck = (node) => {
+    switch (node.astType) {
+      case "statements":
+
+      case "expression":
+
+      case "":
+
+    }
+  }
+
+  typecheck(ast)
+
+  // throw new TypeError("yo you got a type error")
+  return typedAst
 }
 
 
@@ -320,6 +408,11 @@ generateBinary = (typedAst) => {
 
 }
 
+parseAndTypecheck = (text) => {
+  const ast = parseC(text)
+  const typedAst = typecheckC(ast)
+  return typedAst
+}
 
 compileC = (text) => {
   const ast = parseC(text)
@@ -341,5 +434,5 @@ interpretC = (text) => {
   interpretC(typedAst, cMemory)
   return cMemory
 }
-  // static in C is WEIRD!
-  // it lets you define a global variable inside a function that's only visible inside that function.
+// static in C is WEIRD!
+// it lets you define a global variable inside a function that's only visible inside that function.
