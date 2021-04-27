@@ -17,38 +17,21 @@ escapeRegex = (text) => {
 // biggest token first!
 literalTokens = [
   // accessors
-  `->`,
-  `.`,
+  `->`, `.`,
 
   // boolean
-  `&&`,
-  `||`,
-  `!`,
+  `&&`, `||`, `!`,
 
   // bitwise
-  `|`,
-  `&`,
-  `>>`,
-  `<<`,
-  `^`,
-  `~`,
+  `|`, `&`, `>>`, `<<`,
+  `^`, // bitwise xor
+  `~`, // bitwise not
 
   // arithmetic
-  `++`,
-  `--`,
-  `+`,
-  `-`,
-  `*`,
-  `/`,
-  `%`,
+  `++`, `--`, `+`, `-`, `*`, `/`, `%`,
 
   // comparison
-  `==`,
-  `!=`,
-  `>=`,
-  `<=`,
-  `>`,
-  `<`,
+  `==`, `!=`, `>=`, `<=`, `>`, `<`,
 
   // assignment
   // I'm trying parsing += and such in the parser instead of the lexer
@@ -58,33 +41,26 @@ literalTokens = [
   `,`,
 
   // brackets
-  `(`,
-  `)`,
-  `[`,
-  `]`,
-  `{`,
-  `}`,
+  `(`, `)`,
+  `[`, `]`,
+  `{`, `}`,
 ]
 
 // all groups have to be non capturing
-regexTokens = [
-  [`[0-9]+\\.[0-9]+`, `float`], // need to check exact C float rules
-  [`[0-9]+`, `int`],
+regexTokens = {
+  float: `[0-9]+\\.[0-9]+`, // need to check exact C float rules
+  int: `[0-9]+`,
+  string: `"(?:[^"]|\\")*"`,
+  char: `'(?:[^']|\\')*'`,
+  label: `\\n[a-zA-Z0-9_]+:`,
+  directive: `#[a-zA-Z0-9_]+`,
+  name: `[a-zA-Z0-9_]+`,
+  linecomment: `//[^\\n]*\\n`,
+  blockcomment: `/\\*(?:[^*]|\\*[^/])*\\*/`,
+  whitespace: `\\s+`,
+}
 
-  [`"(?:[^"]|\\")*"`, `string`],
-  [`'(?:[^']|\\')*'`, `char`],
-
-  [`\\n[a-zA-Z0-9_]+:`, `label`],
-  [`#[a-zA-Z0-9_]+`, `directive`],
-  [`[a-zA-Z0-9_]+`, `name`],
-
-  [`//[^\\n]*\\n`, `linecomment`],
-  [`/\\*(?:[^*]|\\*[^/])*\\*/`, `blockcomment`],
-
-  [`\\s+`, `whitespace`],
-]
-
-regexStringForm = regexTokens.reduce((acc, cur) => acc + `(?<${cur[1]}>${cur[0]})|`, "")
+regexStringForm = Object.keys(regexTokens).reduce((acc, cur) => acc + `(?<${cur}>${regexTokens[cur]})|`, "")
 regexStringForm += literalTokens.reduce((acc, cur) => acc + `${escapeRegex(cur[0])}|`, "")
 regexStringForm = regexStringForm.substring(0, regexStringForm.length - 1)
 console.log(regexStringForm)
@@ -185,15 +161,6 @@ parseC = (text) => {
       const result = parser()
       if (result) return result
       idx = startIdx
-    }
-  }
-
-  // parser series is more complicated because you need to combine the results somehow
-  const parserSeries = (...parsers) => {
-    const startIdx = idx
-    for (let parser of parsers) {
-      const result = parser()
-      if (result !== undefined) return // @INPROGRESS
     }
   }
 
@@ -492,21 +459,39 @@ typecheckC = (ast) => {
    */
   // can identify functions by name only because C doesn't have function overloading
 
-  let context = { functionName: "$$GLOBAL$$", }
+  const typecheckPassthrough = (node) => {
+    for (let statement of node.statements || []) {
+      typecheck(statement)
+    }
+    if (node.body) typecheck(node.body)
+    if (node.condition) typecheck(node.condition)
+    if (node.setup) typecheck(node.setup)
+    if (node.comparison) typecheck(node.comparison)
+    if (node.increment) typecheck(node.increment)
+  }
 
+  let context = { functionName: "$GLOBAL$", }
   const typecheck = (node) => {
+    console.log(node)
     switch (node.astType) {
-      case "statements":
-        for (let statement of node.statements) {
-          typecheck(statement)
+      case "declaration":
+        asif
+        break
+      case "expression":
+        switch (node.expressionType) {
+
         }
         break
-      case "while":
-      case "declaration":
-      case "expression":
       case "type":
+        break
+
+      case "statements":
       case "while":
+      case "for":
       case "goto": // goto must be within the same function in C. otherwise use longjump
+        // but longjump originally only copied registers not stack, but now it usually copies stack too
+        typecheckPassthrough(node)
+        break;
       default:
         throw new Error(`astType not recognized by typechecker: ${node.astType}`)
     }
