@@ -114,7 +114,7 @@ parseC = (text) => {
     if (node.statements.length > 0) return node
   }
 
-  const parseStatement = () => parserUnion(parseDeclaration, parseFunctionDeclaration, parseControlFlow, parseExpressionStatement)
+  const parseStatement = () => parserUnion(parseDeclaration, parseFunctionDeclaration, parseControlFlow, parseExpressionStatement, parseTypedef)
 
   const parseExpressionStatement = () => {
     const node = { astType: "expressionStatement", expression: undefined }
@@ -222,12 +222,24 @@ parseC = (text) => {
     return result
   }
 
+  const parseTypedef = () => {
+    if (eat().keyword !== "typedef") return
+    const node = { astType: "typedef", name: undefined, type: undefined }
+    node.type = p(parseType)
+    if (!node.type) return
+    node.name = eat().name
+    if (!node.name) return
+    if (!eat().text === ";") return
+    return node
+  }
+
   const parseFunctionDeclaration = () => {
     const node = { astType: "functionDeclaration", returnType: undefined, name: undefined, arguments: [], body: undefined }
     node.returnType = p(parseType)
     if (!node.returnType) return
     node.name = eat().name
     if (!node.name) return
+    if (!eat().text === "(") return
 
     if (tokens[idx].text === ")") {
       idx++
@@ -254,6 +266,7 @@ parseC = (text) => {
 
     node.body = p(parseBlock)
     if (!node.body) return
+    return node
   }
 
   const parseDeclaration = () => {
@@ -275,26 +288,54 @@ parseC = (text) => {
     return node
   }
 
-
+  // this structure doesn't work with introducers
   const parseType = () => {
-    const result = { astType: "type", typeTag: undefined }
-    const token = tokens[idx]
+    const node = { astType: "type", typeTag: undefined }
+    let token = eat()
     if (!token.keyword) {
       return
     }
     switch (token.keyword) {
       case "int":
-        result.typeTag = "int"
-        idx++
+        node.typeTag = "int"
         break
       case "float":
-        result.typeTag = "float"
-        idx++
+        node.typeTag = "float"
+        break
+      case "struct":
+        node.typeTag = "struct"
+        node.members = []
+        token = eat()
+        if (token.name) {
+          node.name = token.name
+          token = eat()
+        }
+        if (token.text !== "{") return
+        for (let i = true; i;) {
+          token = tokens[idx]
+          if (token.text === "}") {
+            idx++
+            break
+          }
+          const member = {}
+          member.type = p(parseType)
+          if (!member.type) return
+          member.name = eat().name
+          if (!member.name) return
+          if (eat().text !== ";") return
+          node.members.push(member)
+        }
+        break
+      case "string":
+        node.typeTag = "string"
+        break
+      case "void":
+        node.typeTag = "void"
         break
       default:
         return
     }
-    return result
+    return node
   }
 
   const parseExpression = () => parserUnion(parseLiteral,
@@ -345,6 +386,8 @@ parseC = (text) => {
       idx++
       return node
     }
+
+    // this lets me "break" out of this for loop from the inner switch
     for (let i = 0; i !== "end";) {
       const parameter = p(parseExpression)
       if (!parameter) return
