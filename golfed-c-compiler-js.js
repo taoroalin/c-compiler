@@ -151,7 +151,6 @@ lexC = (text) => {
 
 parseC = (text) => {
   const tokens = lexC(text)
-  console.log(tokens)
 
   let idx = 0
 
@@ -161,6 +160,12 @@ parseC = (text) => {
     const result = f()
     if (result) return result
     idx = startIdx
+  }
+
+  const eat = () => {
+    const result = tokens[idx]
+    idx++
+    return result
   }
 
   // can you parse from here based on one token? 
@@ -193,13 +198,12 @@ parseC = (text) => {
   }
 
   // block is just statements + curly braces
+  // currently block doesn't parse {}
   const parseBlock = () => {
-    if (tokens[idx].text !== "{") return
-    idx++
+    if (eat().text !== "{") return
     const result = p(parseStatements)
     if (result === undefined) return
-    if (tokens[idx].text !== "}") return
-    idx++
+    if (eat().text !== "}") return
     return result
   }
 
@@ -213,20 +217,25 @@ parseC = (text) => {
     if (node.statements.length > 0) return node
   }
 
-  const parseStatement = () => parserUnion(parseDeclaration, parseFunctionDeclaration, parseControlFlow)
+  const parseStatement = () => parserUnion(parseDeclaration, parseFunctionDeclaration, parseControlFlow, parseExpressionStatement)
 
-  const parseControlFlow = () => parserUnion(parseWhile, parseFor, parseIf, parseDoWhile)
+  const parseExpressionStatement = () => {
+    const node = { astType: "expressionStatement", expression: undefined }
+    node.expression = p(parseExpression)
+    if (eat().text !== ";") return
+    return node
+  }
+
+  // lone block is considered control flow
+  const parseControlFlow = () => parserUnion(parseWhile, parseControlFlowOneLiner, parseFor, parseIf, parseDoWhile, parseBlock)
 
   const parseWhile = () => {
     const node = { astType: "while", condition: undefined, body: undefined }
-    if (tokens[idx].keyword !== "while") return
-    idx++
-    if (tokens[idx].text !== "(") return
-    idx++
+    if (eat().keyword !== "while") return
+    if (eat().text !== "(") return
     node.condition = p(parseExpression)
     if (!node.condition) return
-    if (tokens[idx].text !== ")") return
-    idx++
+    if (eat().text !== ")") return
     node.body = p(parseBlock)
     if (node.body === undefined) return
     return node
@@ -234,30 +243,86 @@ parseC = (text) => {
 
   const parseFor = () => {
     const node = { astType: "for", setup: undefined, condition: undefined, increment: undefined, body: undefined }
-    if (token.keyword !== "for") return
-    idx++
-    if (token.text !== "(") return
-    idx++
-    // @INPROGRESS
+
+    if (eat().keyword !== "for") return
+
+    if (eat().text !== "(") return
+
+    node.setup = p(parseStatement)
+    if (!node.setup) return
+
+    node.condition = p(parseStatement)
+    if (!node.condition) return
+
+    node.increment = p(parseExpression)
+    if (!node.increment) return
+
+    if (eat().text !== ")") return
+
+    node.body = p(parseBlock)
+    if (!node.body) return
     return node
   }
 
   const parseIf = () => {
+    if (eat().keyword !== "if") return
+    if (eat().text !== "(") return
     const node = { astType: "while", condition: undefined, body: undefined }
-    if (tokens[idx].keyword !== "while") return
-    idx++
-    if (tokens[idx].text !== "(") return
-    idx++
     node.condition = p(parseExpression)
     if (!node.condition) return
-    if (tokens[idx].text !== ")") return
-    idx++
+    if (eat().text !== ")") return
     node.body = p(parseBlock)
     if (node.body === undefined) return
+    // @TODO handle else
     return node
   }
 
-  const parseDoWhile = () => { }
+  const parseDoWhile = () => {
+    const node = { astType: "doWhile", condition: undefined, body: undefined }
+    if (eat().keyword !== "do") return
+    node.body = p(parseBlock)
+    if (node.body === undefined) return
+    if (eat().keyword !== "while") return
+    if (eat().text !== "(") return
+    node.condition = p(parseExpression)
+    if (!node.condition) return
+    if (eat().text !== ")") return
+    if (eat().text !== ";") return
+    return node
+  }
+
+  // return is considered control flow one liner
+  const parseControlFlowOneLiner = () => {
+    const result = { astType: undefined, gotoLabel: undefined }
+    switch (tokens[idx].keyword) {
+      case "break":
+        idx++
+        node.astType = "break"
+        break
+      case "continue":
+        idx++
+        node.astType = "continue"
+        break
+      case "goto":
+        idx++
+        if (tokens[idx].name) {
+          node.astType = "goto"
+          node.gotoLabel = tokens[idx].name
+          idx++
+        } else return
+        break
+      case "return":
+        idx++
+        node.expression = p(parseExpression)
+        if (node.expression !== undefined) return
+        break
+      default:
+        return
+    }
+    if (tokens[idx].text !== ";") return
+    idx++
+    return result
+  }
 
   const parseFunctionDeclaration = () => {
 
@@ -269,23 +334,18 @@ parseC = (text) => {
     node.type = p(parseType)
     if (!node.type) return
 
-    node.name = tokens[idx].name
+    node.name = eat().name
     if (!node.name) return
-    idx++
 
-    if (tokens[idx].text !== "=") return
-    idx++
+    if (eat().text !== "=") return
 
     node.expression = p(parseExpression)
     if (!node.expression) return
-    token = tokens[idx]
 
-    if (token.text !== ";") return
-    idx++
+    if (eat().text !== ";") return
 
     return node
   }
-
 
 
   const parseType = () => {
@@ -312,33 +372,38 @@ parseC = (text) => {
   const parseExpression = () => parserUnion(parseLiteral,
     parseOperatorExpression,
     parseFunctionApplication,
+    parseVariable,
     parseParenthesizedExpression)
 
+  const parseVariable = () => {
+    const name = eat().name;
+    if (name === undefined) return
+    return { astType: "variable", name }
+  }
+
   const parseLiteral = () => {
-    let token = tokens[idx]
+    let token = eat()
+
     if (token.int !== undefined) {// because int can be zero
       const type = { astType: "type", typeTag: "int", size: 32, unsigned: false }
-      idx++
       return { astType: "expression", expressionType: "literal", type, value: token.int }
 
     } else if (token.float !== undefined) {// because int can be zero
       const type = { astType: "type", typeTag: "float", size: 64 }
-      idx++
       return { astType: "expression", expressionType: "literal", type, value: token.float }
 
     } else if (token.char !== undefined) {// because int can be zero
       const type = { astType: "type", typeTag: "char", size: token.char.length }
-      idx++
       return { astType: "expression", expressionType: "literal", type, value: token.char }
 
-    } else if (token.float !== undefined) {// because int can be zero
+    } else if (token.string !== undefined) {// because int can be zero
       const type = { astType: "type", typeTag: "string", size: token.string.length + 1 }
-      idx++
       return { astType: "expression", expressionType: "literal", type, value: token.string }
 
-    } else return
+    }
   }
 
+  // op levels are ascending so things that aren't part of expressions (outermost level) can have oplevel undefined
   const parseOperatorExpression = () => {
 
   }
@@ -346,13 +411,27 @@ parseC = (text) => {
   const parseFunctionApplication = () => {
     // I prefer the word parameter over argument. less agressive
     const node = { astType: "application", name: undefined, parameters: [] }
-    node.name = tokens[idx].name
+    node.name = eat().name
     if (!node.name) return
-    idx++
-    if (tokens[idx].text !== "(") return
-    idx++
-
-    // @INPROGRESS
+    if (eat().text !== "(") return
+    if (tokens[idx].text === ")") {
+      idx++
+      return node
+    }
+    for (let i = 0; i !== "end";) {
+      const parameter = p(parseExpression)
+      if (!parameter) return
+      node.parameters.push(parameter)
+      switch (eat().text) {
+        case ")":
+          i = "end"
+          break
+        case ",":
+          break
+        default:
+          return
+      }
+    }
     return node
   }
 
@@ -367,15 +446,16 @@ parseC = (text) => {
     return result
   }
 
-  // op levels are ascending so things that aren't part of expressions (outermost level) can have oplevel undefined
-
-  // parseStatements()
-
   return p(parseStatements)
 }
 
+
+
 const defaultTypes = {
-  s64: { typeTag: "int", size: 64, unsigned: false }
+  s64: { typeTag: "int", size: 64, unsigned: false },
+  s32: { typeTag: "int", size: 32, unsigned: false },
+  f32: { typeTag: "float", size: 32 },
+  f64: { typeTag: "float", size: 64 },
 }
 
 const _astTypes = "expression statements statement declaration type while for if "
@@ -383,17 +463,52 @@ const _expressionTypes = "literal operatorExpression application"
 
 // how to identify types???????????? Now again I think I'm going with s8, s16, ect...
 typecheckC = (ast) => {
-  const typedAst = { structs: {}, types: {}, functions: {}, globals: {}, main: undefined }
+  const typedAst = { structs: {}, types: defaultTypes, functions: {}, globals: {}, main: undefined }
+  /**
+  context:
+  current function
+  control flow stack
+  
+  
+  function info:
+  input type
+  output type
+  block
+  
+  block info:
+  block type
+  variables
+    name
+    statement number where defined (because var can shadow another half way through)
+  
+  
+  
+   */
+
+  /**
+  whatevs. I'm gonna ignore break and shadowing so I don't have to keep track of scopes, only functions
+  (kinda get why original JS didn't have thos :( )
+  
+   */
   // can identify functions by name only because C doesn't have function overloading
+
+  let context = { functionName: "$$GLOBAL$$", }
 
   const typecheck = (node) => {
     switch (node.astType) {
       case "statements":
-
+        for (let statement of node.statements) {
+          typecheck(statement)
+        }
+        break
+      case "while":
+      case "declaration":
       case "expression":
-
-      case "":
-
+      case "type":
+      case "while":
+      case "goto": // goto must be within the same function in C. otherwise use longjump
+      default:
+        throw new Error(`astType not recognized by typechecker: ${node.astType}`)
     }
   }
 
@@ -405,6 +520,31 @@ typecheckC = (ast) => {
 
 
 generateBinary = (typedAst) => {
+  /**
+  when I generate function calls, control flows, pointers, such, I will have to know their positions. 
+  How I'm thinking of doing this is by generating exe with placeholder pointers, putting executable position into the ast, then walking the ast again and setting the pointers 
+  */
+
+  /**
+  What instructions will I need?
+  
+  lea
+  add
+  
+  jump
+  jle
+  jeq
+  
+  // minimal set of instructions (while still leveraging the alu)
+  
+  ret
+  jle
+  lea
+  add
+  mult
+  
+  
+   */
 
 }
 
