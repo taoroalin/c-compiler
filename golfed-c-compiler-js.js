@@ -1,76 +1,3 @@
-regexControlChars = "+-^|*()[]{}./"
-
-escapeRegex = (text) => {
-  let result = ""
-  for (let letter of text) {
-    if (regexControlChars.indexOf(letter) > -1) {
-      result += "\\"
-    }
-    result += letter
-  }
-  return result
-}
-
-// need to keep in mind that any token that can be a prefix of another token
-// needs to appear later
-
-// biggest token first!
-literalTokens = [
-  // accessors
-  `->`, `.`,
-
-  // boolean
-  `&&`, `||`, `!`,
-
-  // bitwise
-  `|`, `&`, `>>`, `<<`,
-  `^`, // bitwise xor
-  `~`, // bitwise not
-
-  // arithmetic
-  `++`, `--`, `+`, `-`, `*`, `/`, `%`,
-
-  // comparison
-  `==`, `!=`, `>=`, `<=`, `>`, `<`,
-
-  // assignment
-  // I'm trying parsing += and such in the parser instead of the lexer
-  `=`,
-
-  `;`, // cuz c needs it...
-  `,`,
-
-  // brackets
-  `(`, `)`,
-  `[`, `]`,
-  `{`, `}`,
-]
-
-// all groups have to be non capturing
-regexTokens = {
-  float: `[0-9]+\\.[0-9]+`, // need to check exact C float rules
-  int: `[0-9]+`,
-  string: `"(?:[^"]|\\")*"`,
-  char: `'(?:[^']|\\')*'`,
-  label: `\\n[a-zA-Z0-9_]+:`,
-  directive: `#[a-zA-Z0-9_]+`,
-  name: `[a-zA-Z0-9_]+`,
-  linecomment: `//[^\\n]*\\n`,
-  blockcomment: `/\\*(?:[^*]|\\*[^/])*\\*/`,
-  whitespace: `\\s+`,
-}
-
-regexStringForm = Object.keys(regexTokens).reduce((acc, cur) => acc + `(?<${cur}>${regexTokens[cur]})|`, "")
-regexStringForm += literalTokens.reduce((acc, cur) => acc + `${escapeRegex(cur[0])}|`, "")
-regexStringForm = regexStringForm.substring(0, regexStringForm.length - 1)
-console.log(regexStringForm)
-regex = RegExp(regexStringForm, 'gs')
-
-console.log(regex)
-
-let keywords = { for: 1, while: 1, do: 1, break: 1, continue: 1, if: 1, else: 1, switch: 1, case: 1, default: 1, goto: 1, typedef: 1, struct: 1, union: 1, sizeof: 1, void: 1, return: 1, register: 1, auto: 1, volatile: 1, static: 1, extern: 1, const: 1, unsigned: 1, int: 1, short: 1, long: 1, double: 1, float: 1, char: 1 }
-
-let directives = { define: 1, include: 1, undef: 1, ifdef: 1, ifndef: 1, if: 1, else: 1, elif: 1, endif: 1, error: 1, pragma: 1 }
 
 /**
 to finish today:
@@ -78,6 +5,9 @@ while, for, if, else, int, float, +,-,*,/
 */
 
 lexC = (text) => {
+  const keywords = { for: 1, while: 1, do: 1, break: 1, continue: 1, if: 1, else: 1, switch: 1, case: 1, default: 1, goto: 1, typedef: 1, struct: 1, union: 1, sizeof: 1, void: 1, return: 1, register: 1, auto: 1, volatile: 1, static: 1, extern: 1, const: 1, unsigned: 1, int: 1, short: 1, long: 1, double: 1, float: 1, char: 1 }
+
+  const directives = { define: 1, include: 1, undef: 1, ifdef: 1, ifndef: 1, if: 1, else: 1, elif: 1, endif: 1, error: 1, pragma: 1 }
   let lexIndex = 0
   console.log("lexing: " + text)
   const tokens = []
@@ -231,6 +161,7 @@ parseC = (text) => {
     return node
   }
 
+
   const parseIf = () => {
     if (eat().keyword !== "if") return
     if (eat().text !== "(") return
@@ -292,7 +223,37 @@ parseC = (text) => {
   }
 
   const parseFunctionDeclaration = () => {
+    const node = { astType: "functionDeclaration", returnType: undefined, name: undefined, arguments: [], body: undefined }
+    node.returnType = p(parseType)
+    if (!node.returnType) return
+    node.name = eat().name
+    if (!node.name) return
 
+    if (tokens[idx].text === ")") {
+      idx++
+    } else {
+      // this will get more complicated when I support type stuff after name
+      // will need a "parseTypedName" or something
+      for (let i = 0; i !== "end";) {
+        const type = p(parseType)
+        if (!type) return
+        const name = eat().name
+        if (!name) return
+        node.parameters.push({ type, name })
+        switch (eat().text) {
+          case ")":
+            i = "end"
+            break
+          case ",":
+            break
+          default:
+            return
+        }
+      }
+    }
+
+    node.body = p(parseBlock)
+    if (!node.body) return
   }
 
   const parseDeclaration = () => {
@@ -430,7 +391,6 @@ const _expressionTypes = "literal operatorExpression application"
 
 // how to identify types???????????? Now again I think I'm going with s8, s16, ect...
 typecheckC = (ast) => {
-  const typedAst = { structs: {}, types: defaultTypes, functions: {}, globals: {}, main: undefined }
   /**
   context:
   current function
@@ -459,6 +419,8 @@ typecheckC = (ast) => {
    */
   // can identify functions by name only because C doesn't have function overloading
 
+  const typedAst = { structs: {}, types: defaultTypes, functions: {}, globals: {}, main: undefined }
+
   const typecheckPassthrough = (node) => {
     for (let statement of node.statements || []) {
       typecheck(statement)
@@ -475,7 +437,24 @@ typecheckC = (ast) => {
     console.log(node)
     switch (node.astType) {
       case "declaration":
-        asif
+        const uniqueType = typecheck(node.type)
+        const expression = typecheck(node.expression)
+        const typedAstNode = { type: uniqueType, expression }
+        const name = node.name
+        if (context.functionName === "$GLOBAL$") {
+          if (typedAst.globals[name]) {
+            throw new Error(`Redeclaration of global variable ${name}`)
+          }
+          typedAstNode.parent = typedAst.globals[name]
+          typedAst.globals[name] = typedAstNode
+        } else {
+          const currentFn = typedAst.functions[context.functionName]
+          if (currentFn.variables[name]) {
+            throw new Error(`Redeclaration of function scope variable ${name}`)
+          }
+          currentFn.variables[name] = typedAstNode
+          typedAstNode.parent = currentFn
+        }
         break
       case "expression":
         switch (node.expressionType) {
@@ -483,8 +462,8 @@ typecheckC = (ast) => {
         }
         break
       case "type":
-        break
 
+        break
       case "statements":
       case "while":
       case "for":
@@ -547,7 +526,7 @@ compileC = (text) => {
 }
 
 
-interpretC = (typedAst) => {
+interpretTypedAst = (typedAst) => {
 
 }
 
@@ -556,7 +535,7 @@ interpretC = (text) => {
   const ast = parseC(text)
   const typedAst = typecheckC(ast)
   cMemory = new ArrayBuffer(1_000_000)
-  interpretC(typedAst, cMemory)
+  interpretTypedAst(typedAst, cMemory)
   return cMemory
 }
 // static in C is WEIRD!
