@@ -54,9 +54,9 @@ regexTokens = {
   char: `'(?:[^']|\\')*'`,
   label: `\\n[a-zA-Z0-9_]+:`,
   directive: `#[a-zA-Z0-9_]+`,
-  name: `[a-zA-Z0-9_]+`,
-  linecomment: `//[^\\n]*\\n`,
-  blockcomment: `/\\*(?:[^*]|\\*[^/])*\\*/`,
+  name: `[a-zA-Z_][a-zA-Z0-9_]*`,
+  linecomment: `\\/\\/[^\\n]*\\n`,
+  blockcomment: `\\/\\*(?:[^*]|\\*[^/])*\\*\\/`,
   whitespace: `\\s+`,
 }
 
@@ -64,5 +64,7 @@ regexStringForm = Object.keys(regexTokens).reduce((acc, cur) => acc + `(?<${cur}
 regexStringForm += literalTokens.reduce((acc, cur) => acc + `${escapeRegex(cur[0])}|`, "")
 regexStringForm = regexStringForm.substring(0, regexStringForm.length - 1)
 
-console.log(regexStringForm)
 regex = RegExp(regexStringForm, 'gs')
+
+regexJsString = `regex=/${regexStringForm}/gs;`
+console.log(regexJsString)

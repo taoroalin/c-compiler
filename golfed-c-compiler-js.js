@@ -331,7 +331,6 @@ parseC = (text) => {
     }
   }
 
-  // op levels are ascending so things that aren't part of expressions (outermost level) can have oplevel undefined
   const parseOperatorExpression = () => {
 
   }
@@ -531,12 +530,13 @@ interpretTypedAst = (typedAst) => {
 }
 
 
-interpretC = (text) => {
-  const ast = parseC(text)
-  const typedAst = typecheckC(ast)
-  cMemory = new ArrayBuffer(1_000_000)
-  interpretTypedAst(typedAst, cMemory)
-  return cMemory
-}
+// interpretC = (text) => {
+//   const ast = parseC(text)
+//   const typedAst = typecheckC(ast)
+//   const cMemory = new ArrayBuffer(1_000_000)
+//   interpretTypedAst(typedAst, cMemory)
+//   return cMemory
+// }
+
 // static in C is WEIRD!
 // it lets you define a global variable inside a function that's only visible inside that function.
