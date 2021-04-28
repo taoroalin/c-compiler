@@ -61,7 +61,7 @@ lexC = (text) => {
     if (match.groups.string)
       result.string = unescapeStringLiteral(str.substring(1, str.length - 1))
     if (match.groups.char)
-      result.char = str.substring(1, str.length - 1)
+      result.char = unescapeStringLiteral(str.substring(1, str.length - 1))
     if (match.groups.int)
       if (match.groups.hex) {
         result.int = parseInt(match.groups.hex, 16)
@@ -258,9 +258,19 @@ parseC = (text) => {
   }
 
   const parseFunctionDeclaration = () => {
-    const node = { astType: "functionDeclaration", returnType: undefined, name: undefined, arguments: [], body: undefined }
-    node.returnType = p(parseType)
-    if (!node.returnType) return
+    const node = {
+      astType: "functionDeclaration",
+      type: {
+        typeTag: "function",
+        returnType: undefined,
+        argumentTypes: []
+      },
+      name: undefined,
+      argumentNames: [],
+      body: undefined
+    }
+    node.type.returnType = p(parseType)
+    if (!node.type.returnType) return
     node.name = eat().name
     if (!node.name) return
     if (!eat().text === "(") return
@@ -275,7 +285,8 @@ parseC = (text) => {
         if (!type) return
         const name = eat().name
         if (!name) return
-        node.parameters.push({ type, name })
+        node.type.argumentTypes.push(type)
+        node.argumentNames.push(name)
         switch (eat().text) {
           case ")":
             i = "end"
@@ -322,9 +333,12 @@ parseC = (text) => {
     switch (token.keyword) {
       case "int":
         node.typeTag = "int"
+        node.size = 32
+        node.unsigned = false
         break
       case "float":
         node.typeTag = "float"
+        node.size = 64
         break
       case "struct":
         node.typeTag = "struct"
@@ -371,7 +385,7 @@ parseC = (text) => {
   const parseVariable = () => {
     const name = eat().name;
     if (name === undefined) return
-    return { astType: "variable", name }
+    return { astType: "expression", expressionType: "variable", name }
   }
 
   const parseLiteral = () => {
@@ -401,8 +415,7 @@ parseC = (text) => {
   }
 
   const parseFunctionApplication = () => {
-    // I prefer the word parameter over argument. less agressive
-    const node = { astType: "application", name: undefined, parameters: [] }
+    const node = { astType: "expression", expressionType: "application", name: undefined, arguments: [] }
     node.name = eat().name
     if (!node.name) return
     if (eat().text !== "(") return
@@ -415,7 +428,7 @@ parseC = (text) => {
     for (let i = 0; i !== "end";) {
       const parameter = p(parseExpression)
       if (!parameter) return
-      node.parameters.push(parameter)
+      node.arguments.push(parameter)
       switch (eat().text) {
         case ")":
           i = "end"
@@ -446,16 +459,15 @@ parseC = (text) => {
 
 
 const defaultTypes = {
-  s64: { typeTag: "int", size: 64, unsigned: false },
-  s32: { typeTag: "int", size: 32, unsigned: false },
-  f32: { typeTag: "float", size: 32 },
-  f64: { typeTag: "float", size: 64 },
+  s64: { astType: "type", typeTag: "int", size: 64, unsigned: false },
+  s32: { astType: "type", typeTag: "int", size: 32, unsigned: false },
+  f32: { astType: "type", typeTag: "float", size: 32 },
+  f64: { astType: "type", typeTag: "float", size: 64 },
 }
 
 const _astTypes = "expression statements statement declaration type while for if "
 const _expressionTypes = "literal operatorExpression application"
 
-// how to identify types???????????? Now again I think I'm going with s8, s16, ect...
 typecheckC = (ast) => {
   /**
   context:
@@ -487,6 +499,16 @@ typecheckC = (ast) => {
 
   const typedAst = { structs: {}, types: defaultTypes, functions: {}, globals: {}, main: undefined }
 
+  const deepEqual = (a, b) => {
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+
+  const addType = (node) => {
+    const name = node.name || ("" + Math.random())
+    typedAst.types[name] = node
+    return node
+  }
+
   const typecheckPassthrough = (node) => {
     for (let statement of node.statements || []) {
       typecheck(statement)
@@ -498,13 +520,39 @@ typecheckC = (ast) => {
     if (node.increment) typecheck(node.increment)
   }
 
+  // types on expressions in ast are only there when they're guaranteed, like from literals
+  const typecheckExpression = (node, expectedType) => {
+    if (node.type) {
+      node.type = typecheck(node.type)
+      if (!deepEqual(node.type, expectedType)) {
+        // @TODO report line, col, token, in error
+        throw new TypeError(`expression ${JSON.stringify(node)} does not match type ${JSON.stringify(expectedType)}`)
+      }
+      return node
+    }
+    switch (node.expressionType) {
+      case "functionApplication":
+        const func = typedAst.functions[node.name]
+        if (!func) {
+          throw new Error(`Function doesn't exist: ${node.name}`)
+        }
+        node.type = func.type
+        for (let argument of node.arguments) {
+          // @TODO typecheck arguments
+        }
+        break
+      case "literal":
+        break
+    }
+  }
+
   let context = { functionName: "$GLOBAL$", }
   const typecheck = (node) => {
     console.log(node)
     switch (node.astType) {
       case "declaration":
         const uniqueType = typecheck(node.type)
-        const expression = typecheck(node.expression)
+        const expression = typecheckExpression(node.expression, type)
         const typedAstNode = { type: uniqueType, expression }
         const name = node.name
         if (context.functionName === "$GLOBAL$") {
@@ -522,13 +570,32 @@ typecheckC = (ast) => {
           typedAstNode.parent = currentFn
         }
         break
-      case "expression":
-        switch (node.expressionType) {
-
+      case "functionDeclaration":
+        if (typedAst.functions[node.name]) {
+          throw new Error(`Redeclaration of function ${node.name}`)
         }
+        typedAst.functions[node.name] = node
+        // for(let i=0;i<)
+        // todo typecheck function body
         break
       case "type":
-
+        if (node.name) {
+          if (types[node.name]) {
+            if (JSON.stringify(types[node.name]) !== JSON.stringify(node)) {
+              throw new TypeError(`Redeclaration of type ${node.name}`)
+            }
+            return types[node.name]
+          } else {
+            return addType(node)
+          }
+        } else {
+          for (let type in typedAst.types) {
+            if (JSON.stringify(type) === JSON.stringify(node)) {
+              return type
+            }
+          }
+          return addType(node)
+        }
         break
       case "statements":
       case "while":

@@ -43,7 +43,7 @@ const runAll = () => {
 }
 // runAll()
 
-console.log(parseC(examples.typedef2))
+console.log(parseC(examples.functionDeclaration))
 console.log(parseC(examples.all))
 console.log(parseC(examples.if))
 console.log(parseAndTypecheck(examples.while))
