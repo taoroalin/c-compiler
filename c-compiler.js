@@ -80,7 +80,6 @@ lexC = (text) => {
     throw new SyntaxError(`Can't lex ${text.substring(lexIndex)} at position ${lexIndex}`)
   }
   tokens.push({ end: true })
-  console.log(tokens)
   return tokens
 }
 
@@ -220,7 +219,7 @@ parseC = (text) => {
 
   // return is considered control flow one liner
   const parseControlFlowOneLiner = () => {
-    const result = { astType: undefined, gotoLabel: undefined }
+    const node = { astType: undefined }
     switch (eat().keyword) {
       case "break":
         node.astType = "break"
@@ -236,14 +235,15 @@ parseC = (text) => {
         } else return
         break
       case "return":
+        node.astType = "return"
         node.expression = p(parseExpression)
-        if (node.expression !== undefined) return
+        if (node.expression === undefined) return
         break
       default:
         return
     }
     if (eat().text !== ";") return
-    return result
+    return node
   }
 
   const parseTypedef = () => {
@@ -261,6 +261,7 @@ parseC = (text) => {
     const node = {
       astType: "functionDeclaration",
       type: {
+        astType: "type",
         typeTag: "function",
         returnType: undefined,
         argumentTypes: []
@@ -426,9 +427,9 @@ parseC = (text) => {
 
     // this lets me "break" out of this for loop from the inner switch
     for (let i = 0; i !== "end";) {
-      const parameter = p(parseExpression)
-      if (!parameter) return
-      node.arguments.push(parameter)
+      const argument = p(parseExpression)
+      if (!argument) return
+      node.arguments.push(argument)
       switch (eat().text) {
         case ")":
           i = "end"
@@ -459,42 +460,24 @@ parseC = (text) => {
 
 
 const defaultTypes = {
-  s64: { astType: "type", typeTag: "int", size: 64, unsigned: false },
-  s32: { astType: "type", typeTag: "int", size: 32, unsigned: false },
-  f32: { astType: "type", typeTag: "float", size: 32 },
-  f64: { astType: "type", typeTag: "float", size: 64 },
+  "unsigned char": { astType: "type", typeTag: "int", size: 8, unsigned: true },
+  "unsigned short int": { astType: "type", typeTag: "int", size: 16, unsigned: true },
+  "unsigned int": { astType: "type", typeTag: "int", size: 32, unsigned: true },
+  "unsigned long long": { astType: "type", typeTag: "int", size: 64, unsigned: true },
+
+  "char": { astType: "type", typeTag: "int", size: 8, unsigned: false },
+  "short": { astType: "type", typeTag: "int", size: 16, unsigned: false },
+  "int": { astType: "type", typeTag: "int", size: 32, unsigned: false },
+  "long int": { astType: "type", typeTag: "int", size: 64, unsigned: false },
+
+  "float": { astType: "type", typeTag: "float", size: 32 },
+  "double": { astType: "type", typeTag: "float", size: 64 },
 }
 
 const _astTypes = "expression statements statement declaration type while for if "
 const _expressionTypes = "literal operatorExpression application"
 
 typecheckC = (ast) => {
-  /**
-  context:
-  current function
-  control flow stack
-  
-  
-  function info:
-  input type
-  output type
-  block
-  
-  block info:
-  block type
-  variables
-    name
-    statement number where defined (because var can shadow another half way through)
-  
-  
-  
-   */
-
-  /**
-  whatevs. I'm gonna ignore break and shadowing so I don't have to keep track of scopes, only functions
-  (kinda get why original JS didn't have thos :( )
-  
-   */
   // can identify functions by name only because C doesn't have function overloading
 
   const typedAst = { structs: {}, types: defaultTypes, functions: {}, globals: {}, main: undefined }
@@ -514,45 +497,80 @@ typecheckC = (ast) => {
       typecheck(statement)
     }
     if (node.body) typecheck(node.body)
-    if (node.condition) typecheck(node.condition)
+    if (node.condition) typecheckExpression(node.condition, typedAst.types.u8)
     if (node.setup) typecheck(node.setup)
-    if (node.comparison) typecheck(node.comparison)
-    if (node.increment) typecheck(node.increment)
+    if (node.comparison) typecheckExpression(node.comparison, typedAst.types.u8)
+    // need to handle type coersion / expressions that don't need a defined type?
+    // for use in expressionStatement instead of express
+    if (node.increment) typecheckExpression(node.increment, typedAst.types.s32)
   }
 
   // types on expressions in ast are only there when they're guaranteed, like from literals
   const typecheckExpression = (node, expectedType) => {
-    if (node.type) {
-      node.type = typecheck(node.type)
-      if (!deepEqual(node.type, expectedType)) {
-        // @TODO report line, col, token, in error
-        throw new TypeError(`expression ${JSON.stringify(node)} does not match type ${JSON.stringify(expectedType)}`)
-      }
-      return node
-    }
     switch (node.expressionType) {
       case "functionApplication":
         const func = typedAst.functions[node.name]
         if (!func) {
           throw new Error(`Function doesn't exist: ${node.name}`)
         }
-        node.type = func.type
-        for (let argument of node.arguments) {
+        node.uniqueType = func.type
+        const argumentTypes = func.type.argumentTypes
+        if (argumentTypes.length !== node.arguments.length) {
+          throw new Error(`Function ${func.name} called with ${node.arguments.length} arguments, needs ${argumentTypes.length}`)
+        }
+        for (let i = 0; i < argumentTypes.length; i++) {
           // @TODO typecheck arguments
+          const argument = node.arguments[i]
+          const argumentType = argumentTypes[i]
+          typecheckExpression(argument, argumentType)
         }
         break
       case "literal":
         break
     }
+    addUniqueType(node.type, node)
+    if (!deepEqual(node.type, expectedType)) {
+      // @TODO report line, col, token, in error
+      throw new TypeError(`expression ${JSON.stringify(node)} does not match type ${JSON.stringify(expectedType)}`)
+    }
+    return node
+  }
+
+  const addUniqueType = (node, parentNode) => {
+    if (node.name) {
+      if (typedAst.types[node.name]) {
+        if (!deepEqual(typedAst.types[node.name], node)) {
+          throw new TypeError(`Redeclaration of type ${node.name}`)
+        }
+        parentNode.uniqueType = typedAst.types[node.name]
+      } else {
+        for (let typeName in typedAst.types) {
+          const type = typedAst.types[typeName]
+          if (deepEqual(type, node)) {
+            parentNode.uniqueType = typedAst.types[node.name] = type
+          }
+        }
+        parentNode.uniqueType = addType(node)
+      }
+    } else {
+      for (let typeName in typedAst.types) {
+        const type = typedAst.types[typeName]
+        if (deepEqual(type, node)) {
+          parentNode.uniqueType = type
+        }
+      }
+      parentNode.uniqueType = addType(node)
+    }
+    return parentNode.uniqueType
   }
 
   let context = { functionName: "$GLOBAL$", }
   const typecheck = (node) => {
-    console.log(node)
+    // console.log(node)
     switch (node.astType) {
       case "declaration":
-        const uniqueType = typecheck(node.type)
-        const expression = typecheckExpression(node.expression, type)
+        const uniqueType = addUniqueType(node.type, node)
+        const expression = typecheckExpression(node.expression, uniqueType)
         const typedAstNode = { type: uniqueType, expression }
         const name = node.name
         if (context.functionName === "$GLOBAL$") {
@@ -574,28 +592,19 @@ typecheckC = (ast) => {
         if (typedAst.functions[node.name]) {
           throw new Error(`Redeclaration of function ${node.name}`)
         }
+        node.variables = {}
         typedAst.functions[node.name] = node
+        context.functionName = node.name
+        addUniqueType(node.type, node)
+        typecheck(node.body)
+        context.functionName = "$GLOBAL$"
         // for(let i=0;i<)
         // todo typecheck function body
         break
-      case "type":
-        if (node.name) {
-          if (types[node.name]) {
-            if (JSON.stringify(types[node.name]) !== JSON.stringify(node)) {
-              throw new TypeError(`Redeclaration of type ${node.name}`)
-            }
-            return types[node.name]
-          } else {
-            return addType(node)
-          }
-        } else {
-          for (let type in typedAst.types) {
-            if (JSON.stringify(type) === JSON.stringify(node)) {
-              return type
-            }
-          }
-          return addType(node)
-        }
+      case "return":
+        // make sure it has the same type
+        // in order to check that the function always returns you need to check every code path,
+        // which means block level type stuff which is coming later
         break
       case "statements":
       case "while":
