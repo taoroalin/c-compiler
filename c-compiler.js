@@ -572,6 +572,7 @@ generateBinary = (typedAst) => {
   lea
   add
   mult
+  ...more
   
   
    */
