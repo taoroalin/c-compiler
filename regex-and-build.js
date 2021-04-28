@@ -44,16 +44,17 @@ literalTokens = [
   `(`, `)`,
   `[`, `]`,
   `{`, `}`,
+
+  // weird tokens
+  `:`, `#`
 ]
 
 // all groups have to be non capturing
 regexTokens = {
   float: `[0-9]+\\.[0-9]+`, // need to check exact C float rules
-  int: `[0-9]+`,
+  int: `0x(?<hex>[0-9a-f]+)|0b(?<binary>[01]+)|0(?<octal>[0-7]+)|[0-9]+[uU]?[lL]{0,2}`,
   string: `"(?:[^"]|\\")*"`,
   char: `'(?:[^']|\\')*'`,
-  label: `\\n[a-zA-Z0-9_]+:`,
-  directive: `#[a-zA-Z0-9_]+`,
   name: `[a-zA-Z_][a-zA-Z0-9_]*`,
   linecomment: `\\/\\/[^\\n]*\\n`,
   blockcomment: `\\/\\*(?:[^*]|\\*[^/])*\\*\\/`,
@@ -61,10 +62,11 @@ regexTokens = {
 }
 
 regexStringForm = Object.keys(regexTokens).reduce((acc, cur) => acc + `(?<${cur}>${regexTokens[cur]})|`, "")
-regexStringForm += literalTokens.reduce((acc, cur) => acc + `${escapeRegex(cur[0])}|`, "")
+regexStringForm += literalTokens.reduce((acc, cur) => acc + `${escapeRegex(cur)}|`, "")
 regexStringForm = regexStringForm.substring(0, regexStringForm.length - 1)
 
 regex = RegExp(regexStringForm, 'gs')
 
 regexJsString = `regex=/${regexStringForm}/gs;`
 console.log(regexJsString)
+console.log(regexStringForm)

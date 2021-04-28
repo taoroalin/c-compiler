@@ -3,11 +3,37 @@
 to finish today:
 while, for, if, else, int, float, +,-,*,/
 */
+const keywords = { for: 1, while: 1, do: 1, break: 1, continue: 1, if: 1, else: 1, switch: 1, case: 1, default: 1, goto: 1, typedef: 1, struct: 1, union: 1, sizeof: 1, void: 1, return: 1, register: 1, auto: 1, volatile: 1, static: 1, extern: 1, const: 1, unsigned: 1, int: 1, short: 1, long: 1, double: 1, float: 1, char: 1 }
+
+const directives = { define: 1, include: 1, undef: 1, ifdef: 1, ifndef: 1, if: 1, else: 1, elif: 1, endif: 1, error: 1, pragma: 1 }
 
 lexC = (text) => {
-  const keywords = { for: 1, while: 1, do: 1, break: 1, continue: 1, if: 1, else: 1, switch: 1, case: 1, default: 1, goto: 1, typedef: 1, struct: 1, union: 1, sizeof: 1, void: 1, return: 1, register: 1, auto: 1, volatile: 1, static: 1, extern: 1, const: 1, unsigned: 1, int: 1, short: 1, long: 1, double: 1, float: 1, char: 1 }
+  const intToChar = String.fromCharCode
+  const hexToChar = (str) => String.fromCharCode(parseInt(str, 16))
+  const unescapeStringLiteral = (text) => {
+    return text.replaceAll(/\\(?:x([0-9a-f]{2,100})|(u[0-9a-f]{4})|(U[0-9a-f]{8})|([0-7]{3})|([abefnrtv\\'"?]))/g,
+      (str, x, u, U, octal, char) => {
+        if (x) return intToChar(parseInt(x, 16))
+        if (u) return intToChar(parseInt(u, 16))
+        if (U) return intToChar(parseInt(U, 16)) // @TODO need to check official
+        if (octal) return intToChar(parseInt(octal, 8))
+        return {
+          a: intToChar(7),
+          b: intToChar(8),
+          e: hexToChar("1B"),
+          f: hexToChar("0C"),
+          n: hexToChar("0A"), // this becomes \r\n on windows
+          r: hexToChar("0D"),
+          t: hexToChar("09"),
+          v: hexToChar("0B"),
+          "\\": hexToChar("5C"),
+          "'": hexToChar("27"),
+          '"': hexToChar("22"),
+          '?': hexToChar("3F"),
+        }[char]
+      })
+  }
 
-  const directives = { define: 1, include: 1, undef: 1, ifdef: 1, ifndef: 1, if: 1, else: 1, elif: 1, endif: 1, error: 1, pragma: 1 }
   let lexIndex = 0
   console.log("lexing: " + text)
   const tokens = []
@@ -25,23 +51,26 @@ lexC = (text) => {
     }
 
     const result = { text: str }
-    if (match.groups.directive) {
-      if (!directives[str.substring(1)]) {
-        throw new SyntaxError(`Can't lex # directive ${str.substring(1)}`)
-      }
-    }
     if (match.groups.name) {
       if (keywords[str])
         result.keyword = str
       else
         result.name = str
     }
+    // @TODO handle C escape sequences
     if (match.groups.string)
-      result.string = str.substring(1, str.length - 1)
+      result.string = unescapeStringLiteral(str.substring(1, str.length - 1))
     if (match.groups.char)
       result.char = str.substring(1, str.length - 1)
     if (match.groups.int)
-      result.int = parseInt(str)
+      if (match.groups.hex) {
+        result.int = parseInt(match.groups.hex, 16)
+      } else if (match.groups.octal) {
+        result.int = parseInt(match.groups.octal, 8)
+      } else if (match.groups.binary) {
+        result.int = parseInt(match.groups.binary, 2)
+      } else
+        result.int = parseInt(str)
     if (match.groups.float)
       result.float = parseFloat(str)
     tokens.push(result)
@@ -192,33 +221,28 @@ parseC = (text) => {
   // return is considered control flow one liner
   const parseControlFlowOneLiner = () => {
     const result = { astType: undefined, gotoLabel: undefined }
-    switch (tokens[idx].keyword) {
+    switch (eat().keyword) {
       case "break":
-        idx++
         node.astType = "break"
         break
       case "continue":
-        idx++
         node.astType = "continue"
         break
       case "goto":
-        idx++
         if (tokens[idx].name) {
           node.astType = "goto"
-          node.gotoLabel = tokens[idx].name
-          idx++
+          node.gotoLabel = eat().name
+          if (!node.gotoLabel) return
         } else return
         break
       case "return":
-        idx++
         node.expression = p(parseExpression)
         if (node.expression !== undefined) return
         break
       default:
         return
     }
-    if (tokens[idx].text !== ";") return
-    idx++
+    if (eat().text !== ";") return
     return result
   }
 
