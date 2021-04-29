@@ -46,9 +46,12 @@ const runAll = () => {
 }
 // runAll()
 
-console.log(parseC(examples.functionDeclaration2))
-console.log(parseC(examples.all))
-console.log(parseC(examples.if))
+// console.log(parseC(examples.functionDeclaration2))
+// console.log(parseC(examples.all))
+// console.log(parseC(examples.if))
+console.log(parseC(examples.assignment))
 console.log(parseAndTypecheck(examples.assignment))
+console.log(parseC(examples.functionDeclaration))
 console.log(parseAndTypecheck(examples.functionDeclaration))
+console.log(parseC(examples.functionDeclarationAndUse))
 console.log(parseAndTypecheck(examples.functionDeclarationAndUse))

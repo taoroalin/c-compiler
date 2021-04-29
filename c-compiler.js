@@ -486,12 +486,6 @@ typecheckC = (ast) => {
     return JSON.stringify(a) === JSON.stringify(b)
   }
 
-  const addType = (node) => {
-    const name = node.name || ("" + Math.random())
-    typedAst.types[name] = node
-    return node
-  }
-
   const typecheckPassthrough = (node) => {
     for (let statement of node.statements || []) {
       typecheck(statement)
@@ -508,13 +502,13 @@ typecheckC = (ast) => {
   // types on expressions in ast are only there when they're guaranteed, like from literals
   const typecheckExpression = (node, expectedType) => {
     switch (node.expressionType) {
-      case "functionApplication":
+      case "application":
         const func = typedAst.functions[node.name]
         if (!func) {
           throw new Error(`Function doesn't exist: ${node.name}`)
         }
-        node.uniqueType = func.type
-        const argumentTypes = func.type.argumentTypes
+        node.uniqueType = func.uniqueType.returnType
+        const argumentTypes = func.uniqueType.argumentTypes
         if (argumentTypes.length !== node.arguments.length) {
           throw new Error(`Function ${func.name} called with ${node.arguments.length} arguments, needs ${argumentTypes.length}`)
         }
@@ -526,12 +520,33 @@ typecheckC = (ast) => {
         }
         break
       case "literal":
+        addUniqueType(node.type, node)
         break
+      case "variable":
+        if (context.functionName === "$GLOBAL$") {
+          const variable = typedAst.globals[node.name]
+          if (!variable) {
+            throw new Error(`Use of undefined variabled: ${node.name}`)
+          }
+          node.uniqueType = variable.uniqueType
+        } else {
+          const fn = typedAst.functions[context.functionName]
+          const variable = fn.variables[node.name] || fn.arguments[node.name]
+          if (!variable) {
+            throw new Error(`Use of undefined variabled: ${node.name}`)
+          }
+          node.uniqueType = variable.uniqueType
+        }
+        break
+      default:
+        throw new Error(`expression type not handled: ${node.expressionType}`)
     }
-    addUniqueType(node.type, node)
-    if (!deepEqual(node.type, expectedType)) {
+    if (!deepEqual(node.uniqueType, expectedType)) {// needs to become === to use uniqueType and be efficient
       // @TODO report line, col, token, in error
-      throw new TypeError(`expression ${JSON.stringify(node)} does not match type ${JSON.stringify(expectedType)}`)
+      console.log(node.uniqueType)
+      console.log(expectedType)
+      console.log(typedAst)
+      throw new TypeError(`expression ${JSON.stringify(node.uniqueType)} does not match type ${JSON.stringify(expectedType)}`)
     }
     return node
   }
@@ -547,19 +562,24 @@ typecheckC = (ast) => {
         for (let typeName in typedAst.types) {
           const type = typedAst.types[typeName]
           if (deepEqual(type, node)) {
-            parentNode.uniqueType = typedAst.types[node.name] = type
+            typedAst.types[node.name] = type
+            parentNode.uniqueType = type
+            return parentNode.uniqueType
           }
         }
-        parentNode.uniqueType = addType(node)
+        parentNode.uniqueType = node
+        typedAst.types[node.name] = node
       }
     } else {
       for (let typeName in typedAst.types) {
         const type = typedAst.types[typeName]
         if (deepEqual(type, node)) {
           parentNode.uniqueType = type
+          return parentNode.uniqueType
         }
       }
-      parentNode.uniqueType = addType(node)
+      parentNode.uniqueType = node
+      typedAst.types[Math.random()] = node
     }
     return parentNode.uniqueType
   }
@@ -569,23 +589,20 @@ typecheckC = (ast) => {
     // console.log(node)
     switch (node.astType) {
       case "declaration":
-        const uniqueType = addUniqueType(node.type, node)
-        const expression = typecheckExpression(node.expression, uniqueType)
-        const typedAstNode = { type: uniqueType, expression }
+        addUniqueType(node.type, node)
+        const expression = typecheckExpression(node.expression, node.uniqueType)
         const name = node.name
         if (context.functionName === "$GLOBAL$") {
           if (typedAst.globals[name]) {
             throw new Error(`Redeclaration of global variable ${name}`)
           }
-          typedAstNode.parent = typedAst.globals[name]
-          typedAst.globals[name] = typedAstNode
+          typedAst.globals[name] = node
         } else {
           const currentFn = typedAst.functions[context.functionName]
           if (currentFn.variables[name]) {
             throw new Error(`Redeclaration of function scope variable ${name}`)
           }
-          currentFn.variables[name] = typedAstNode
-          typedAstNode.parent = currentFn
+          currentFn.variables[name] = node
         }
         break
       case "functionDeclaration":
@@ -596,20 +613,27 @@ typecheckC = (ast) => {
         typedAst.functions[node.name] = node
         context.functionName = node.name
         addUniqueType(node.type, node)
+        // node.arguments = {}
+        // for (let i = 0; i < node.argumentNames.length; i++) {
+        //   node.arguments[node.argumentNames[i]] = 
+        // }
         typecheck(node.body)
         context.functionName = "$GLOBAL$"
-        // for(let i=0;i<)
-        // todo typecheck function body
         break
       case "return":
         // make sure it has the same type
         // in order to check that the function always returns you need to check every code path,
         // which means block level type stuff which is coming later
+        if (context.functionName === "$GLOBAL$") {
+          throw new Error(`"return" used in global scope`)
+        }
+        typecheckExpression(node.expression, typedAst.functions[context.functionName].uniqueType.returnType)
         break
       case "statements":
       case "while":
       case "for":
-      case "goto": // goto must be within the same function in C. otherwise use longjump
+      case "goto":
+        // goto must be within the same function in C. otherwise use longjump
         // but longjump originally only copied registers not stack, but now it usually copies stack too
         typecheckPassthrough(node)
         break;
@@ -642,8 +666,13 @@ generateBinary = (typedAst) => {
   jeq
   
   // minimal set of instructions (while still leveraging the alu)
+  // https://aaronbloomfield.github.io/pdr/book/x86-64bit-ccc-chapter.pdf
+  
+  argument registers in order:
+  rdi rsi rdx rcx r8 r9
   
   ret
+  call
   jle
   lea
   add
