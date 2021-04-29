@@ -356,7 +356,7 @@ parseC = (text) => {
             idx++
             break
           }
-          const member = {}
+          const member = { type: undefined, name: undefined }
           member.type = p(parseType)
           if (!member.type) return
           member.name = eat().name
@@ -381,7 +381,28 @@ parseC = (text) => {
     parseOperatorExpression,
     parseFunctionApplication,
     parseVariable,
-    parseParenthesizedExpression)
+    parseParenthesizedExpression,
+    parseStructAccess)
+
+  const parseVariableOrStructMember = () => parserUnion(parseVariable, parseStructAccess)
+
+  const parseStructAccess = () => {
+    const node = { astType: "structAccess", parentName: undefined, child: undefined, isArrow: false }
+    node.parentName = eat().name
+    if (!node.parentName) return
+    switch (eat().text) {
+      case ".":
+        break
+      case "->":
+        node.isArrow = true
+        break
+      default:
+        return
+    }
+    node.child = p(parseVariableOrStructMember)
+    if (!node.child) return
+    return node
+  }
 
   const parseVariable = () => {
     const name = eat().name;
@@ -552,6 +573,21 @@ typecheckC = (ast) => {
   }
 
   const addUniqueType = (node, parentNode) => {
+    switch (node.typeTag) {
+      case "array":
+        break
+      case "struct":
+        const packed = true || node.isPacked
+        let bytesUsed = 0
+        for (let member of node.members) {
+          member.type.name = member.name
+          addUniqueType(member.type, member)
+          member.offset = bytesUsed
+          const bytesHere = member.uniqueType.size
+          bytesUsed += bytesHere
+        }
+        break
+    }
     if (node.name) {
       if (typedAst.types[node.name]) {
         if (!deepEqual(typedAst.types[node.name], node)) {
@@ -588,6 +624,10 @@ typecheckC = (ast) => {
   const typecheck = (node) => {
     // console.log(node)
     switch (node.astType) {
+      case "typedef":
+        node.type.name = node.name
+        addUniqueType(node.type, node)
+        break
       case "declaration":
         addUniqueType(node.type, node)
         const expression = typecheckExpression(node.expression, node.uniqueType)

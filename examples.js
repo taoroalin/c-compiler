@@ -24,6 +24,15 @@ const examples = {
     int i;
     int j;
   } namez = 1;`,
+
+  structAccess: `int myInt = myStruct.i;`,
+
+  structAccess2: `typedef struct myStruct {
+    int i;
+    int j;
+  } myStruct;
+  int myInt = myStruct.i;`,
+
   while: `while(1){int i=0;}`,
   for: `for(int i=0;int j=0;1){
     int myInt = 0;
@@ -49,8 +58,10 @@ const runAll = () => {
 // console.log(parseC(examples.functionDeclaration2))
 // console.log(parseC(examples.all))
 // console.log(parseC(examples.if))
-console.log(parseC(examples.assignment))
-console.log(parseAndTypecheck(examples.assignment))
+console.log(lexC(examples.structAccess))
+console.log(parseC(examples.structAccess))
+console.log(parseC(examples.typedef2))
+console.log(parseAndTypecheck(examples.typedef2))
 console.log(parseC(examples.functionDeclaration))
 console.log(parseAndTypecheck(examples.functionDeclaration))
 console.log(parseC(examples.functionDeclarationAndUse))
